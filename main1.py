@@ -1,120 +1,71 @@
-import cv2
-import scipy
-from scipy import stats
+import cv2 as cv
 import numpy as np
-from collections import defaultdict
-import os
+import matplotlib.pyplot as plt
+
+# Image input
+inputImage = cv.imread("images/house.jpg")
+cv.imshow("original image", inputImage)
+
+# Convert to grayscale
+grayScaleImage = cv.cvtColor(inputImage, cv.COLOR_BGR2GRAY)
+# cv.imshow("Grayscale image", grayScaleImage)
+
+# applying median blur to smoothen an image
+smoothGrayScale = cv.medianBlur(grayScaleImage, 7)
+# cv.imshow("Smoothen image", smoothGrayScale)
+
+# retrieving the edges for cartoon effect by using thresholding technique
+getEdge = cv.adaptiveThreshold(smoothGrayScale, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY, 7, 7)
+# cv.imshow("Edge detection image", getEdge)
 
 
-def update_c(C,hist):
-    while True:
-        groups=defaultdict(list)
-
-        for i in range(len(hist)):
-            if(hist[i] == 0):
-                continue
-            d=np.abs(C-i)
-            index=np.argmin(d)
-            groups[index].append(i)
-
-        new_C=np.array(C)
-        for i,indice in groups.items():
-            if(np.sum(hist[indice])==0):
-                continue
-            new_C[i]=int(np.sum(indice*hist[indice])/np.sum(hist[indice]))
-
-        if(np.sum(new_C-C)==0):
-            break
-        C=new_C
-
-    return C,groups
+# Method will reduce the number of colors in the image, and it will create a cartoon-like effect. Color quantization
+# is performed by using the K-means clustering algorithm for displaying output with a limited number of colors.
+def color_quantization(image, k_value):
+    # Transform the image
+    data = np.float32(image).reshape((-1, 3))
+    # Determine criteria
+    criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 20, 0.001)
+    # Implementing K-Means clustering algorithm
+    ret, label, center = cv.kmeans(data, k_value, None, criteria, 10, cv.KMEANS_RANDOM_CENTERS)
+    center = np.uint8(center)
+    result = center[label.flatten()]
+    result = result.reshape(image.shape)
+    return result
 
 
-# Calculates K Means clustering
-def K_histogram(hist):
+totalColor = 9
 
-    alpha=0.001
-    N=80
-    C=np.array([128])
+# Reducing Colour Palette
+reducedColorPalette = color_quantization(inputImage, totalColor)
+# cv.imshow("Reduced Colour Palette", reducedColorPalette)
 
-    while True:
-        C,groups=update_c(C,hist)
+# Sometimes after blurring or smoothening an image may also tend to smooth the edges. To avoid that we will use the
+# Bilateral filer
+bilateralFilter = cv.bilateralFilter(inputImage, d=7, sigmaColor=200, sigmaSpace=200)
+# cv.imshow("Bilateral Filter", bilateralFilter)
 
-        new_C=set()
-        for i,indice in groups.items():
-            if(len(indice)<N):
-                new_C.add(C[i])
-                continue
+# Combining Edge Mask with Colored image
+cartoonImage = cv.bitwise_and(bilateralFilter, bilateralFilter, mask=getEdge)
+cv.imshow("Final Cartoon image", cartoonImage)
 
-            z, pval=stats.normaltest(hist[indice])
-            if(pval<alpha):
-                left=0 if i==0 else C[i-1]
-                right=len(hist)-1 if i ==len(C)-1 else C[i+1]
-                delta=right-left
-                if(delta >=3):
-                    c1=(C[i]+left)/2
-                    c2=(C[i]+right)/2
-                    new_C.add(c1)
-                    new_C.add(c2)
-                else:
-                    new_C.add(C[i])
-            else:
-                new_C.add(C[i])
-        if(len(new_C)==len(C)):
-            break
-        else:
-            C=np.array(sorted(new_C))
-    return C
+# Save cartooned image
+# inputName = str(inputImage)
+# print(inputName)
+# fileName = "cartooned=" + inputName
+# print(fileName)
+cv.imwrite("cartoon-images/cartooned-image.jpg", cartoonImage)
 
-# The main controlling function
-def caart(img):
+# Plotting the whole transition
+# images = [inputImage, grayScaleImage, smoothGrayScale, getEdge, reducedColorPalette, bilateralFilter, cartoonImage]
 
-    kernel=np.ones((2,2), np.uint8)
-    output=np.array(img)
-    x,y,c=output.shape
-    for i in range(c):
-        output[:,:,i]=cv2.bilateralFilter(output[:,:,i],5,150,150)
-
-    edge=cv2.Canny(output, 100, 200)
-    output=cv2.cvtColor(output,cv2.COLOR_RGB2HSV)
-
-    hists = []
-
-    hist,_=np.histogram(output[:,:,0],bins =np.arange(180+1))
-    hists.append(hist)
-    hist,_=np.histogram(output[:,:,1],bins =np.arange(256+1))
-    hists.append(hist)
-    hist,_=np.histogram(output[:,:,2],bins =np.arange(256+1))
-    hists.append(hist)
-
-
-    C=[]
-    for h in hists:
-        C.append(K_histogram(h))
-    #print("centroids: {0}".format(C))
-
-    output=output.reshape((-1,c))
-    for i in range(c):
-        channel=output[:,i]
-        index=np.argmin(np.abs(channel[:, np.newaxis] - C[i]), axis=1)
-        output[:,i]=C[i][index]
-    output=output.reshape((x,y,c))
-    output=cv2.cvtColor(output, cv2.COLOR_HSV2RGB)
-
-    contours,_=cv2.findContours(edge,cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    cv2.drawContours(output,contours,-1,0,thickness=1)
-    #cartoon = cv2.bitwise_and(output, output, mask=contours)
-    for i in range(3):
-        output[:,:,i]=cv2.erode(output[:,:,i], kernel, iterations=1)
-    #Laplacian = cv2.Laplacian(output,cv2.CV_8U, ksize=11)
-    #output=output-Laplacian
-    return output
-
-
-with os.scandir('images/') as entries:
-    for entry in entries:
-        IMAGE_PATH = "images/"+entry.name
-        output=caart(cv2.imread(IMAGE_PATH))
-        CARTOON_PATH="cartoons/cartoon_"+entry.name
-        cv2.imwrite(CARTOON_PATH, output)
-
+# # Define a figure of size (8, 8)
+# figure = plt.figure(figsize=(20, 20))
+# # Define rows and columns
+# rows, cols = 2, 4
+# for i in range(0, cols * rows):
+#     figure.add_subplot(rows, cols, i + 1)
+#     plt.imshow(images[i])
+#
+# print("done")
+cv.waitKey(0)
