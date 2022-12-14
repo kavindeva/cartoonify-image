@@ -50,7 +50,7 @@ def cartoonify(ImagePath):
     # by using thresholding technique
     getEdge = cv2.adaptiveThreshold(smoothGrayScale, 255,
                                     cv2.ADAPTIVE_THRESH_MEAN_C,
-                                    cv2.THRESH_BINARY, 9, 9)
+                                    cv2.THRESH_BINARY, 199, 9)
 
     ReSized4 = cv2.resize(getEdge, (960, 540))
     plt.imshow(ReSized4, cmap='gray')
